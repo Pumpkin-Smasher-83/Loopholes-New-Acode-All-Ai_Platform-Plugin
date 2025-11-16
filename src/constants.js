@@ -1,19 +1,33 @@
 export const AI_PROVIDERS = [
-  "OpenAI", // just for formality and I have tested it with my friends api key so If you have api key then test it thoroughly and let me know about it
-  // best when comes to pricing
-  "Google",
-  // great if your hardware is capable
   "Ollama",
-  // Insane speed 
-  "Groq",
-  // kind off paid and I think users also can't afford
-  //"Deepseek",
-  // I don't have key to test
-  //"MistralAI",
-  //"Anthropic",
-  // due to security issue Cloudflare doesn't works on localhost but acode is on localhost
-  //"Cloudflare Workers",
-  "OpenAI-Like",
+  "ChatGPT",
+  "Claude",
+  "Gemini",
+  "Mistral",
+  "Llama",
+  "Bard",
+  "Perplexity",
+  "Grok",
+  "Copilot",
+  "YouChat",
+  "Phind",
+  "CodeLlama",
+  "AlphaCode",
+  "TabNine",
+  "Kite",
+  "GitHub-Copilot",
+  "IntelliCode",
+  "SourceGraph",
+  "Replit-AI",
+  "Codeium",
+  "Codex",
+  "AI21-Studio",
+  "Cohere",
+  "Hugging-Face",
+  "RunwayML",
+  "Stability-AI",
+  "DeepAI"
+  // All providers are routed through Ollama
 ];
 
 export const OPENAI_LIKE = "OpenAI-Like";
