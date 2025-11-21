@@ -8,6 +8,7 @@ import { AIMessage, HumanMessage, trimMessages } from "@langchain/core/messages"
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { RunnableWithMessageHistory } from "@langchain/core/runnables";
+import { DynamicTool } from "@langchain/core/tools";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatGroq } from "@langchain/groq";
 import { ChatOpenAI } from "@langchain/openai";
@@ -16,7 +17,7 @@ import copy from "copy-to-clipboard";
 import { v4 as uuidv4 } from "uuid";
 import { APIKeyManager } from "./api_key";
 import { AI_PROVIDERS, OPENAI_LIKE, copyIconSvg, sendIconSvg, stopIconSvg } from "./constants";
-import { getModelsFromProvider } from "./utils";
+import { getModelsFromProvider, webSearch } from "./utils";
 
 const multiPrompt = acode.require("multiPrompt");
 const fs = acode.require("fs");
@@ -72,8 +73,10 @@ class AIAssistant {
     editor.commands.addCommand({
       name: "ai_assistant",
       description: "AI Assistant",
+      bindKey: { win: "Ctrl-Shift-O", mac: "Command-Shift-O" },
       exec: this.run.bind(this),
     });
+    console.log("AI Assistant command updated to Ctrl+Shift+O");
 
     selectionMenu.add(async () => {
       let opt = await select("AI Actions", ["Explain Code", "Rewrite", "Generate Code"], {
@@ -129,6 +132,7 @@ class AIAssistant {
         return `
         <li action="model-provider" provider="">Provider: ${window.localStorage.getItem("ai-assistant-provider")}</li>
         <li action="model" modelNme="">Model: ${window.localStorage.getItem("ai-assistant-model-name")}</li>
+        <li action="settings">Settings</li>
         `;
       },
       ...contextMenuOption
@@ -222,12 +226,32 @@ class AIAssistant {
             }
           }
           break;
+        case 'settings':
+          let ollamaApiKey = await prompt("Ollama API Key", window.localStorage.getItem("ollama-api-key") || "", "text", { required: true });
+          if (ollamaApiKey) {
+            window.localStorage.setItem("ollama-api-key", ollamaApiKey);
+            window.toast("API key saved.", 3000);
+          }
+          break;
       }
     };
 
     const mainApp = tag("div", {
       className: "mainApp",
     });
+    const titleContainer = tag("div", {
+      className: "title-container",
+    });
+    const mainTitle = tag("h1", {
+      className: "main-title",
+      textContent: "Loophole & Oblivion's",
+    });
+    const subTitle = tag("h2", {
+      className: "sub-title",
+      textContent: "All Ai-Chat-Cli & Ai-Hacks",
+    });
+    titleContainer.append(mainTitle, subTitle);
+    mainApp.append(titleContainer);
     // main chat box
     this.$chatBox = tag("div", {
       className: "chatBox",
@@ -286,56 +310,16 @@ class AIAssistant {
       if (providerNme) {
         token = await this.apiKeyManager.getAPIKey(providerNme);
       } else {
-        let modelProvider = await select("Select AI Provider", AI_PROVIDERS);
-
-        // Handle OpenAI-Like providers
-        if (modelProvider === OPENAI_LIKE) {
-          // Prompt for required information
-          const apiKey = await prompt("API Key", "", "text", { required: true });
-          if (!apiKey) return;
-
-          const baseUrl = await prompt("API Base URL", "https://api.openai.com/v1", "text", {
-            required: true
-          });
-
-          const modelName = await prompt("Model", "", "text", { required: true });
-          if (!modelName) return;
-
-          // Save settings
-          window.localStorage.setItem("ai-assistant-provider", OPENAI_LIKE);
-          window.localStorage.setItem("ai-assistant-model-name", modelName);
-          window.localStorage.setItem("openai-like-baseurl", baseUrl);
-
-          token = apiKey;
-          providerNme = OPENAI_LIKE;
+        providerNme = "Ollama";
+        const modelNme = "llama3";
+        window.localStorage.setItem("ai-assistant-provider", providerNme);
+        window.localStorage.setItem("ai-assistant-model-name", modelNme);
+        token = "No Need Of API Key";
+        if (!await fs(window.DATA_STORAGE + "secret.key").exists()) {
           await fs(window.DATA_STORAGE).createFile("secret.key", passPhrase);
-          await this.apiKeyManager.saveAPIKey(OPENAI_LIKE, token);
-          window.toast("Configuration saved 🎉", 3000);
-        } 
-        // Handle other providers
-        else {
-          // no prompt for api key in case of ollama
-          let apiKey =
-            modelProvider == AI_PROVIDERS[2]
-              ? "No Need Of API Key"
-              : await prompt("API key of selected provider", "", "text", {
-                required: true,
-              });
-          if (!apiKey) return;
-          loader.showTitleLoader();
-          window.toast("Fetching available models from your account", 2000);
-          let modelList = await getModelsFromProvider(modelProvider, apiKey);
-          loader.removeTitleLoader();
-          const modelNme = await select("Select AI Model", modelList);
-
-          window.localStorage.setItem("ai-assistant-provider", modelProvider);
-          window.localStorage.setItem("ai-assistant-model-name", modelNme);
-          providerNme = modelProvider;
-          token = apiKey;
-          await fs(window.DATA_STORAGE).createFile("secret.key", passPhrase);
-          await this.apiKeyManager.saveAPIKey(providerNme, token);
-          window.toast("Configuration saved 🎉", 3000);
         }
+        await this.apiKeyManager.saveAPIKey(providerNme, token);
+        window.toast("Ollama is set as the default AI provider.", 3000);
       }
 
       let model = window.localStorage.getItem("ai-assistant-model-name");
@@ -368,52 +352,45 @@ class AIAssistant {
     }
   }
 
-  initiateModel(providerNme, token, model) {
-    switch (providerNme) {
-      case AI_PROVIDERS[0]: // OpenAI
-        this.modelInstance = new ChatOpenAI({ apiKey: token, model });
-        break;
-      case AI_PROVIDERS[1]: // Google
-        this.modelInstance = new ChatGoogleGenerativeAI({
-          model,
-          apiKey: token,
-          safetySettings: [
-            {
-              category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-              threshold: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-            },
-          ],
-        });
-        break;
-      case AI_PROVIDERS[2]: // Ollama
-        // check local storage, if user want to provide custom host for ollama
-        let baseUrl = window.localStorage.getItem("Ollama-Host")
-          ? window.localStorage.getItem("Ollama-Host")
-          : "http://localhost:11434";
-        this.modelInstance = new ChatOllama({
-          baseUrl,
-          model
-        });
-        break;
-      case AI_PROVIDERS[3]: // Groq
-        this.modelInstance = new ChatGroq({
-          apiKey: token,
-          model,
-        });
-        break;
-      case OPENAI_LIKE: // OpenAI-Like providers
-        const customBaseUrl = window.localStorage.getItem("openai-like-baseurl") || "https://api.openai.com/v1";
-        this.modelInstance = new ChatOpenAI({
-          apiKey: token,
-          model,
-          configuration: {
-            baseURL: customBaseUrl
-          }
-        });
-        break;
-      default:
-        throw new Error("Unknown provider");
+  async webSearch(query) {
+    let apiKey = window.localStorage.getItem("ollama-api-key");
+    if (!apiKey) {
+      apiKey = await prompt("Ollama API Key", "", "text", { required: true });
+      if (apiKey) {
+        window.localStorage.setItem("ollama-api-key", apiKey);
+      } else {
+        return "API key not provided.";
+      }
     }
+
+    const ollama = new Ollama({
+      host: "https://ollama.com",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+    return await ollama.webSearch({ query });
+  }
+
+  initiateModel(providerNme, token, model) {
+    let baseUrl = window.localStorage.getItem("Ollama-Host")
+      ? window.localStorage.getItem("Ollama-Host")
+      : "http://localhost:11434";
+
+    const webSearchTool = new DynamicTool({
+      name: "web_search",
+      description: "Searches the web for the given query.",
+      func: this.webSearch,
+    });
+
+    this.modelInstance = new ChatOllama({
+      baseUrl,
+      model,
+    }).bindTools([webSearchTool]);
+
+    console.log(
+      `All AI providers are now routed through Ollama with model: ${model}`,
+    );
   }
 
   _sanitizeFileName(fileName) {
